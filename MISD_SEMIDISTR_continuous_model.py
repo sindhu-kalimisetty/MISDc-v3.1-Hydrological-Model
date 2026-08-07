@@ -32,6 +32,7 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
     DIST = EBRR_BASPAR[:, 1:Nsez+1]    # catchment distance to outlet sections
     Ab = EBRR_BASPAR[:, Nsez+1][Ninf:]  # catchments area
     A_DD = EBRR_BASPAR[:, Nsez+2][Ninf:]  # catchments type (1: concentrator, 2: distributed)
+
     
     # Initialization
     M = basin_data[0]['dates'].shape[0]
@@ -128,73 +129,71 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
 
         return rainfall, SWE_melting, SWE_snowpack
 
-    def burek2013_func(C, time_series, inflow_obs):
-        """
-        Reservoir function implementation (Burek et al. 2013)
-        """
-        # Calculate mean inflow
+
+    def burek2013_func(C, time, inflow_obs):
+        """burek2013_func"""
         Qin_mean = np.nanmean(inflow_obs)
 
-        # Initialize storage and outflow arrays
-        S = np.full((len(time_series), 1), np.nan)
-        S[0] = 0.8 * C  # Initial storage at 80% capacity
-        Qres = np.zeros((len(time_series),1))
+        S = np.full(len(time), np.nan, dtype=np.float64)
+        S[0] = 0.8 * C
 
-        # Define reservoir parameters
-        Qmin = 0.4 * Qin_mean  # Minimum flow
-        Qnd = 2.0 * Qin_mean   # Normal discharge
-        Qnorm = Qin_mean       # Normal flow
+        Qres = np.zeros(len(time), dtype=np.float64)
 
-        # Define storage thresholds
-        Lc = 0.1  # Critical level
-        Lf = 0.9  # Flood level
-        Ln = Lf - Lc  # Normal level
+        Qmin = 0.4 * Qin_mean
+        Qnd = 2.0 * Qin_mean
+        Qnorm = Qin_mean
 
-        iter_count = 0
-        for t in range(1, len(time_series)):
-            if isinstance(time_series[t] - time_series[t - 1], np.timedelta64):
-                dt = (time_series[t] - time_series[t - 1]) / np.timedelta64(1, "s")
+        Lc = 0.1
+        Lf = 0.9
+        Ln = Lf - Lc
+       
+        for t in range(1, len(time)):
+            delta = time[t] - time[t-1]
+            if isinstance(delta, np.timedelta64):
+                dt = delta / np.timedelta64(1, 's')
+            elif hasattr(delta, "total_seconds"):
+                dt = delta.total_seconds()
             else:
-                dt = (time_series[t] - time_series[t - 1]).total_seconds()
+                dt = delta * 86400.0
 
-            if t==1:
+            if t == 1:
                 F = S[t-1] / C
                 if F <= 2 * Lc:
-                    Qres[t-1,0] = min(Qmin, (1/dt) * F * S[t-1])
-                elif F > 2 * Lc and F <= Ln:
-                    Qres[t-1,0] = Qmin + (Qnorm - Qmin) * ((F - 2*Lc)/(Ln - 2*Lc))
-                elif F > Ln and F <= Lf:
-                    Qres[t-1,0] = Qnorm + ((F - Ln)/(Lf - Ln)) * max([(inflow_obs[t-1] - Qnorm), (Qnd - Qnorm)])
-                elif F > Lf:
-                    Qres[t-1,0] = max([(F - Lf)/dt * S[t-1], Qnd])
+                    Qres[t-1] = min(Qmin, (1.0 / dt) * F * S[t-1])
+                if F >= 2 * Lc and F < Ln:
+                    Qres[t-1] = (Qmin+ (Qnorm - Qmin)* ((F - 2 * Lc) / (Ln - 2 * Lc)))
+                if F > Ln and F <= Lf:
+                    Qres[t-1] = (Qnorm+ ((F - Ln) / (Lf - Ln))* max(inflow_obs[t-1] - Qnorm,Qnd - Qnorm))
+                if F > Lf:
+                    Qres[t-1] = max(((F - Lf) / dt) * S[t-1],Qnd)
 
-            asd=0
-            n=0
+            asd = 0
+            n = 0
             Qres[t] = Qres[t-1]
-            while asd==0:
-                n=n+1
-                iter_count += 1
-                S[t] = S[t-1] + ((inflow_obs[t] + inflow_obs[t-1])/2) * dt - ((Qres[t] + Qres[t-1])/2) * dt
+            while asd == 0:
+                n += 1
+                S[t] = (S[t-1]+ ((inflow_obs[t] + inflow_obs[t-1]) / 2.0) * dt - ((Qres[t] + Qres[t-1]) / 2.0) * dt)
                 F = S[t] / C
                 if F <= 2 * Lc:
-                    Qres[t,0] = min(Qmin, (1/dt) * F * S[t])
-                elif F >= 2 * Lc and F < Ln:
-                    Qres[t,0] = Qmin + (Qnorm - Qmin) * ((F - 2*Lc)/(Ln - 2*Lc))
-                elif F > Ln and F <= Lf:
-                    Qres[t,0] = Qnorm + ((F - Ln)/(Lf - Ln)) * max([(inflow_obs[t] - Qnorm), (Qnd - Qnorm)])
-                elif F > Lf:
-                    Qres[t,0] = max([(F - Lf)/dt * S[t], Qnd])
-                
-                S0 = S[t-1] + ((inflow_obs[t] + inflow_obs[t-1])/2) * dt - ((Qres[t] + Qres[t-1])/2) * dt
-                if np.allclose(S0, S[t], rtol=1e-3, atol=1e-3):  
-                    asd=1
+                    Qres[t] = min(Qmin,(1.0 / dt) * F * S[t])
+                if F >= 2 * Lc and F < Ln:
+                    Qres[t] = (Qmin+ (Qnorm - Qmin)* ((F - 2 * Lc) / (Ln - 2 * Lc)))
+                if F > Ln and F <= Lf:
+                    Qres[t] = (Qnorm+ ((F - Ln) / (Lf - Ln))* max(inflow_obs[t] - Qnorm,Qnd - Qnorm))
+                if F > Lf:
+                    Qres[t] = max(((F - Lf) / dt) * S[t],Qnd)
+
+                S0 = (S[t-1]+ ((inflow_obs[t] + inflow_obs[t-1]) / 2.0) * dt- ((Qres[t] + Qres[t-1]) / 2.0) * dt)
+                if np.round(S0, 4) == np.round(S[t], 4):
+                    asd = 1
                 else:
                     S[t] = S0
-
-                if n>1000:
+                if n > 1000:
                     break
+
         return Qres, S
-    
+
+
     # Main processing loop
     for i in range(Nbas):
         start_time = time.time()
@@ -218,59 +217,44 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
 
         # Extract basin data
         D = basin_data[i]['dates']
-
         PIO_ = basin_data[i]['rainfall']
         TEMPER = basin_data[i]['temperature']
         Q = basin_data[i]['discharge']
-        # WUse = basin_data[i]['water_use']    
+        WUse = basin_data[i]['water_use']
 
-        # extract months  
+        # extract months
         MESE = np.array([pd.Timestamp(d).month if not pd.isna(d) else np.nan for d in D])
         MESE = MESE.reshape(-1, 1)
 
         # Snow Module
         PIO, SWE, SWE_pack = snow_model(PIO_, TEMPER, -0.5, 0.5, Cm)
 
-        WUse = calculate_water_use(
-        time_period=D,
-        sector='both',
-        base_demand_civil=0.133,
-        base_demand_industrial=0.089,
-        seasonal_factor=True,
-        # daily_pattern=True,
-        climate_zone='temperate',
-        industrial_type='mixed'
-        )
-
-        if WUse.shape[1] != PIO.shape[1]:
-            WUse = np.tile(WUse, (1, PIO.shape[1]))
-       
         # Potential Evapotranspiration calculation
         L = np.array([0.21, 0.22, 0.23, 0.28, 0.30, 0.31,
                     0.30, 0.29, 0.27, 0.25, 0.22, 0.20])
         Ka = 1.26
-        EPOT = np.where(TEMPER > 0, (Kc * (Ka * L[MESE-1] * (0.46 * TEMPER + 8) - 2)) / (24/delta_T),0)
-                
-        # Initialize arrays
-        BF = np.zeros_like(PIO)
-        QS = np.full_like(PIO, np.nan)
-        VolIRR_distr = np.zeros_like(PIO)
-        W = np.zeros_like(PIO)
-        W2 = np.zeros_like(PIO)
-        WW = np.zeros_like(PIO)
-        WW2 = np.zeros_like(PIO)
-        IE = np.zeros_like(PIO)
-        PERC = np.zeros_like(PIO)
-        PERC2 = np.zeros_like(PIO)
-        VolIRR = np.zeros_like(PIO)
-        water_need = np.zeros_like(PIO)
-        unMeetDem = np.zeros_like(PIO)
-        E = np.zeros_like(PIO)
-        SE = np.zeros_like(PIO)
-        SE2 = np.zeros_like(PIO)
+        EPOT = np.where(TEMPER > 0, (Kc * (Ka * L[MESE-1] * (0.46 * TEMPER + 8) - 2)) / (24/delta_T), 0)
 
-        ID_irr_bas = ID_irr[0][i]
-            
+        # Initialize arrays
+        BF = np.zeros_like(PIO_)
+        QS = np.full_like(PIO_, np.nan)
+        VolIRR_distr = np.zeros_like(PIO_)
+        W = np.zeros_like(PIO_)
+        W2 = np.zeros_like(PIO_)
+        WW = np.zeros_like(PIO_)
+        WW2 = np.zeros_like(PIO_)
+        IE = np.zeros_like(PIO_)
+        PERC = np.zeros_like(PIO_)
+        PERC2 = np.zeros_like(PIO_)
+        VolIRR = np.zeros_like(PIO_)
+        water_need = np.zeros_like(PIO_)
+        unMeetDem = np.zeros_like(PIO_)
+        E = np.zeros_like(PIO_)
+        SE = np.zeros_like(PIO_)
+        SE2 = np.zeros_like(PIO_)
+
+        ID_irr_bas = ID_irr[i]
+
         W[0, :] = W_p * W_max
         W2[0, :] = W_p * W_max2
 
@@ -287,75 +271,82 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
             E[t, :] = EPOT[t, :] * W[t, :]/W_max
 
             # Calculate percolation
-            ID= W2[t, :] < W_max2
-            PERC[t, ID] = Ks * (W[t, ID]/W_max)**(m2)    
-            
+            PERC[t, :] = 0.0
+            ID = W2[t, :] < W_max2
+            PERC[t, ID] = Ks * (W[t, ID]/W_max)**(m2)
+
             PERC2[t, :] = Ks2 * (W2[t, :]/W_max2)**(m22)
 
-            ID=PERC[t, :] > 0.75 * W_max
+            ID = PERC[t, :] > 0.75 * W_max
             PERC[t, ID] = 0.75 * W_max
 
             # Update water content
             W[t, :] = W[t, :] + (PIO[t, :] - IE[t, :] - PERC[t, :] - E[t, :]) + SWE[t, :]
-            W[t, W[t, :]<0] = 0
-            
+            W[t, W[t, :] < 0] = 0
+
             W2[t, :] = W2[t, :] + PERC[t, :] - PERC2[t, :] - WUse[t, :]
-            W2[t, W2[t, :]<0] = 0
-            
-            ID= W[t, :] >= W_max
+            W2[t, W2[t, :] < 0] = 0
+
+            ID = W[t, :] >= W_max
             SE[t, ID] = W[t, ID] - W_max
             W[t, ID] = W_max
-            
-            ID=W2[t, :] >= W_max2
-            SE2[t,ID] = W2[t, ID] - W_max2
+
+            ID = W2[t, :] >= W_max2
+            SE2[t, ID] = W2[t, ID] - W_max2
             W2[t, ID] = W_max2
-            
-            if include_irrigation and MESE[t] in  [4, 5, 6, 7, 8, 9]:
+
+            if include_irrigation and MESE[t] in [4, 5, 6, 7, 8, 9]:
                 DISTR_Irr = np.where(ID_irr_bas.flatten() == 1)[0]
-                DISTR_Irr=DISTR_Irr[DISTR_Irr<W.shape[1]]
-                
+                DISTR_Irr = DISTR_Irr[DISTR_Irr < W.shape[1]]
+
                 Thres_irr = 0.55
                 Thres_ini = 0.35
 
-                ID=DISTR_Irr[W[t,DISTR_Irr]<Thres_ini * W_max]  
+                ID = DISTR_Irr[W[t, DISTR_Irr] < Thres_ini * W_max]
 
                 water_need[t, ID] = Thres_irr - (W[t, ID]/W_max)
-                
-                ID2=W2[t, ID] > water_need[t, ID] * W_max
+
+                ID2 = W2[t, ID] > water_need[t, ID] * W_max
                 W[t, ID[ID2]] = Thres_irr * W_max
                 W2[t, ID[ID2]] -= 0.17 * water_need[t, ID[ID2]] * W_max
 
-                
                 W[t, ID[~ID2]] += 0.1 * water_need[t, ID[~ID2]]
                 W2[t, ID[~ID2]] -= 0.1 * 0.17 * water_need[t, ID[~ID2]] * W_max
 
                 VolIRR[t, ID] = water_need[t, ID] * W_max
 
-                # Distribute irrigation volume
-                end_idx = min(t+12, VolIRR_distr.shape[0])
-                VolIRR_distr[t:end_idx, :] += np.nansum(VolIRR[t, ID]/((end_idx-t) * PIO.shape[1]))
-                
             # Ensure non-negative values
-            W[t, W[t, :]<0] = 0
-            W2[t, W2[t, :]<0] = 0
-            
+            W[t, W[t, :] < 0] = 0
+            W2[t, W2[t, :] < 0] = 0
+
+            # Replace NaN values with zero
+            W[t, :] = np.nan_to_num(W[t, :], nan=0.0)
+            W2[t, :] = np.nan_to_num(W2[t, :], nan=0.0)
+
             WW[t, :] = W[t, :]/W_max
             WW2[t, :] = W2[t, :]/W_max2
 
-            # Calculate runoff components
-            BF[t, :] = Ks2 * ((W[t, :] + W2[t, :])/(W_max + W_max2))**(m22)
-            QS[t, :] = IE[t, :] + SE[t, :] + SE2[t, :] - 0.80 * VolIRR_distr[t, :]
 
-            # Track unmet demand
-            ID=QS[t, :] + BF[t, :] < 0
-            unMeetDem[t, ID] = (IE[t, ID] + SE[t, ID] + SE2[t, ID])/0.80
-          
+            BF[t, :] = Ks2 * ((W[t, :] + W2[t, :])/(W_max + W_max2))**(m22)
+
+        Ncols = PIO.shape[1]
+
+        csum = np.cumsum(VolIRR, axis=0)
+        trailing = csum.copy()
+        trailing[12:, :] = csum[12:, :] - csum[:-12, :]
+
+        VolIRR_distr = np.cumsum(trailing, axis=1) / (12 * Ncols)
+
+        QS = IE + SE + SE2 - 0.80 * VolIRR_distr
+        mask = (QS + BF) < 0
+        unMeetDem = np.where(mask, (IE + SE + SE2) / 0.80, 0.0)
+
         WW_all[i] = WW
         WW2_all[i] = WW2
         VorrIrr_all[i] = VolIRR
         E_all[i] = E
         SWE_all[i] = SWE_pack
-            
+
         # Calculate means
         peffmean = np.nanmean(QS, axis=1)
         BF_mean = np.nanmean(BF, axis=1)
@@ -385,6 +376,7 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
             QQBF[:, i] = BF_mean
             QQsim[:, i] = peffmean + BF_mean
 
+
         # Convolution (Hayami)
         for j in range(Nsez):
             if DIST[i + Ninf, j] > 0:
@@ -413,9 +405,11 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
                 QQQBF[:, i + Ninf, j] = np.zeros(M)
                 QQQsim[:, i + Ninf, j] = np.zeros(M)
 
+
     for i in range(Nbas):
         QQBF[:, i] *= (Ab[i]/delta_T/3.6)
         QQsim[:, i] *= (Ab[i]/delta_T/3.6)
+
 
     # Calculate sections discharge in m^3/s
     for i in range(Nbas):
@@ -424,6 +418,24 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
             QQQsim[:, i+Ninf, j] *= (Ab[i]/delta_T/3.6)
             
         VolIrr_sumDisc[:, i] = VolIrr_sum[:, i] * (Ab[i]/delta_T/3.6)
+    
+    nLake = Lake.shape[0]
+    ID_down = [None] * nLake
+
+    for l in range(nLake):
+        lake_idx = int(Lake[l, 0]) - 1      
+
+        ids = np.where(EBRR_BASPAR[lake_idx, 1:100] != -1)[0] + 1
+
+        ids = ids[ids != lake_idx + 1]
+
+        ID_down[l] = ids
+
+    for l in range(nLake - 2, -1, -1):
+
+        if l + 1 < nLake:
+            next_ids = np.unique(np.concatenate([ID_down[k] for k in range(l + 1, nLake)]))
+            ID_down[l] = ID_down[l][~np.isin(ID_down[l], next_ids)]
 
     # Initialize lake simulation array
     QQQsim_outlake = np.zeros((M, Nbas))
@@ -431,23 +443,29 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
         for l in range(Lake.shape[0]):
             lake_idx = int(Lake[l,0])  
             ID = np.where(EBRR_BASPAR[:, lake_idx] != -1)[0]
-            lake_inflow = (np.nansum(QQQsim[:, ID, lake_idx-1], axis=1) - 
-                        0.03 * Lake[l,1]/np.sum(Lake[:,1]) * np.nansum(VolIrr_sumDisc[:, ID], axis=1))
+            ID_down_py = ID_down[l] - 1
+            lake_inflow = (
+                np.nansum(QQQsim[:, ID, lake_idx-1], axis=1)
+                - 0.03 * Lake[l, 1] / np.sum(Lake[:, 1])
+                * np.nansum(VolIrr_sumDisc[:, ID_down_py], axis=1)
+            )
             outlake, Stor_lake = burek2013_func(
                 Lake[l,1], 
                 basin_data[0]['dates'],  
                 lake_inflow
             )
+
             QQQsim_outlake[:, lake_idx-1]=outlake.flatten()
             Stor[:, lake_idx-1]=Stor_lake.flatten()
             sez_contr = np.where(EBRR_BASPAR[lake_idx-1, 1:-2] != -1)[0]
             IDdel = np.isin(ID, lake_idx-1)
             ID = ID[~IDdel]
-  
+      
             # Update discharge values
             for j in range(len(sez_contr)):
                 QQQsim[:, lake_idx-1, sez_contr[j]] = QQQsim_outlake[:, lake_idx-1]
                 QQQsim[:, ID, sez_contr[j]] = np.zeros((QQQsim.shape[0], len(ID)))
+            
 
     for j in range(Nsez):
         for i in range(Ninf):
@@ -476,6 +494,7 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
     Qsim = Qsim1[:, sez_outlet-1]
     QBF_out = np.hstack((QBF1, QQBF))
     Qsim_out = np.hstack((Qsim1, QQsim))
+    
 
     # Calculate unmet demand
     for ll in range(BAS_PAR[0]):
@@ -484,6 +503,7 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
 
     # Set negative values to zero
     Qsim_out[Qsim_out < 0] = 0
+
 
     # Get observed discharge
     Qobs = basin_data[bas_check-1]['discharge']
