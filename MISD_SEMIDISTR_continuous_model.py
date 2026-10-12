@@ -229,7 +229,7 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
         # Snow Module
         PIO, SWE, SWE_pack = snow_model(PIO_, TEMPER, -0.5, 0.5, Cm)
 
-        #use this function incase if you don't have water uses data
+        # Use this function incase if you don't have water uses data
         # WUse = calculate_water_use(
         # time_period=D,
         # sector='both',
