@@ -229,6 +229,21 @@ def MISD_SEMIDISTR_continuous_Lakes_irrig_waterUses_MODIrrRes_Pd(input_data, BAS
         # Snow Module
         PIO, SWE, SWE_pack = snow_model(PIO_, TEMPER, -0.5, 0.5, Cm)
 
+        #use this function incase if you don't have water uses data
+        # WUse = calculate_water_use(
+        # time_period=D,
+        # sector='both',
+        # base_demand_civil=0.133,
+        # base_demand_industrial=0.089,
+        # seasonal_factor=True,
+        # # daily_pattern=True,
+        # climate_zone='temperate',
+        # industrial_type='mixed'
+        # )
+
+        # if WUse.shape[1] != PIO.shape[1]:
+        #     WUse = np.tile(WUse, (1, PIO.shape[1]))
+
         # Potential Evapotranspiration calculation
         L = np.array([0.21, 0.22, 0.23, 0.28, 0.30, 0.31,
                     0.30, 0.29, 0.27, 0.25, 0.22, 0.20])
